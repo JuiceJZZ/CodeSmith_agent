@@ -54,13 +54,21 @@ def chat(user_message: str, settings: Settings) -> str:
 
 def chat_with_tools(user_message: str, settings: Settings) -> ModelReply:
     """让模型进行一次决策，并解析普通文本或单个工具调用。"""
+    messages: list[dict[str, object]] = [
+        {"role": "system", "content": TOOL_SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
+    ]
+    return complete_with_tools(messages, settings)
+
+
+def complete_with_tools(
+    messages: list[dict[str, object]], settings: Settings
+) -> ModelReply:
+    """根据完整消息历史调用一次模型，并解析本轮回复。"""
     client = create_client(settings)
     response = client.chat.completions.create(
         model=settings.deepseek_model,
-        messages=[
-            {"role": "system", "content": TOOL_SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
+        messages=messages,
         tools=TOOL_DEFINITIONS,
         tool_choice="auto",
     )
