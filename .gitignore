@@ -1,0 +1,18 @@
+# 本地凭据：只允许提交示例文件
+.env
+.env.*
+!.env.example
+
+# Python
+**/__pycache__/
+*.pyc
+.venv/
+
+# IDE / editor
+.idea/
+.vscode/
+.cursor/
+
+# Local temporary files
+tmp/
+
