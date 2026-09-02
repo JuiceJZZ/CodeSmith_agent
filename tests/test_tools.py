@@ -1,10 +1,17 @@
 """只读本地工具的单元测试。"""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from codesmith.tools import MAX_FILE_SIZE, ToolError, list_files, read_file
+from codesmith.tools import (
+    MAX_FILE_SIZE,
+    ToolError,
+    execute_tool,
+    list_files,
+    read_file,
+)
 
 
 class ReadOnlyToolsTest(unittest.TestCase):
@@ -52,6 +59,18 @@ class ReadOnlyToolsTest(unittest.TestCase):
         (self.workspace / "large.txt").write_bytes(b"a" * (MAX_FILE_SIZE + 1))
         with self.assertRaisesRegex(ToolError, "超过"):
             read_file(self.workspace, "large.txt")
+
+    def test_execute_list_files_returns_json_text(self) -> None:
+        result = execute_tool("list_files", {}, self.workspace)
+        self.assertEqual(json.loads(result), ["src/", "说明.txt"])
+
+    def test_execute_tool_rejects_unknown_tool(self) -> None:
+        with self.assertRaisesRegex(ToolError, "未知工具"):
+            execute_tool("delete_file", {"path": "说明.txt"}, self.workspace)
+
+    def test_execute_tool_rejects_unknown_argument(self) -> None:
+        with self.assertRaisesRegex(ToolError, "未知工具参数"):
+            execute_tool("read_file", {"path": "说明.txt", "extra": True}, self.workspace)
 
 
 if __name__ == "__main__":

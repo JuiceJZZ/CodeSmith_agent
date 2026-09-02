@@ -6,13 +6,13 @@ CodeSmith 是一个从零实现的轻量级本地 Coding Agent。它计划通过
 
 ## 当前开发状态
 
-目前已完成最小项目骨架、DeepSeek 文本调用和两个本地只读工具，用于逐步验证 Coding Agent 的基础组件。
+目前已完成最小项目骨架、DeepSeek 文本调用、两个本地只读工具，以及一次模型 Tool Calling 的解析与执行。
 
 ```text
 Python -> OpenAI Python SDK -> DeepSeek API -> 文本回复
 ```
 
-当前尚未实现 Agent Loop、模型 Tool Calling、文件修改或命令执行。
+单轮工具演示执行工具后立即停止，尚未实现 observation 回传、Agent Loop、文件修改或命令执行。
 
 
 ## 安装依赖
@@ -47,11 +47,19 @@ python main.py
 
 程序会向 DeepSeek 发送一次固定的测试消息，并输出模型返回的文本。此调用会产生少量 API 费用。
 
+也可以让模型选择并执行一次只读工具：
+
+```bash
+python main.py --tool-demo "请列出当前工作区的文件"
+```
+
+该模式只完成一次模型调用和一次工具执行，不会把工具结果再次发送给模型。
+
 ## 当前目录职责
 
 - `main.py`：最小 CLI 入口
 - `codesmith/config.py`：读取和校验环境配置
-- `codesmith/llm.py`：封装一次普通文本模型调用
+- `codesmith/llm.py`：封装普通文本调用及单次 Tool Calling 响应解析
 - `codesmith/prompts.py`：保存简单系统提示词
 - `codesmith/agent.py`：预留 Agent Loop 模块
 - `codesmith/tools.py`：实现受 workspace 边界保护的 `list_files` 和 `read_file`
@@ -63,8 +71,8 @@ python main.py
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖目录列举、UTF-8 文件读取、绝对路径拒绝、父目录越界、缺失文件和非文本文件等情况。
+测试覆盖工具响应解析、参数 JSON 校验、目录列举、UTF-8 文件读取、绝对路径拒绝、父目录越界、缺失文件和非文本文件等情况；测试不会调用真实 API。
 
 ## 后续计划
 
-建议下一步实现模型原生 Tool Calling 的单次调用与输出解析；确认数据结构后，再加入对话历史和最小 Agent Loop。
+建议下一步实现最小对话历史和 observation 回传，再加入受 `MAX_STEPS` 限制的 Agent Loop。

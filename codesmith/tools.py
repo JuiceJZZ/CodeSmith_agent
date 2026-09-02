@@ -4,10 +4,51 @@
 项目工作区之外的文件。
 """
 
+import json
 from pathlib import Path
 
 
 MAX_FILE_SIZE = 1_000_000
+
+
+# 这里使用模型原生 Function Calling 所需的 JSON Schema，不依赖 Agent SDK。
+TOOL_DEFINITIONS: list[dict[str, object]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "列出 workspace 内指定目录的直接子项。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "相对于 workspace 的目录路径，默认为当前目录。",
+                    }
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "读取 workspace 内一个 UTF-8 文本文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "相对于 workspace 的文件路径。",
+                    }
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
 
 
 class ToolError(ValueError):
@@ -63,6 +104,34 @@ def read_file(workspace: Path, relative_path: str) -> str:
         return file_path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
         raise ToolError(f"文件不是有效的 UTF-8 文本：{relative_path}") from error
+
+
+def execute_tool(name: str, arguments: dict[str, object], workspace: Path) -> str:
+    """校验模型生成的参数，执行一个已注册工具并返回文本结果。"""
+    if name == "list_files":
+        _reject_unknown_arguments(arguments, {"path"})
+        relative_path = arguments.get("path", ".")
+        if not isinstance(relative_path, str):
+            raise ToolError("list_files 的 path 参数必须是字符串。")
+        return json.dumps(list_files(workspace, relative_path), ensure_ascii=False)
+
+    if name == "read_file":
+        _reject_unknown_arguments(arguments, {"path"})
+        relative_path = arguments.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            raise ToolError("read_file 需要非空字符串 path 参数。")
+        return read_file(workspace, relative_path)
+
+    raise ToolError(f"未知工具：{name}")
+
+
+def _reject_unknown_arguments(
+    arguments: dict[str, object], allowed_names: set[str]
+) -> None:
+    unknown_names = set(arguments) - allowed_names
+    if unknown_names:
+        names = ", ".join(sorted(unknown_names))
+        raise ToolError(f"包含未知工具参数：{names}")
 
 
 # TODO: 后续逐步实现 write_file、edit_file、run_command。
