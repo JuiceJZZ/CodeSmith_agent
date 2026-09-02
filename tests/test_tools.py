@@ -1,17 +1,21 @@
 """本地文件工具的单元测试。"""
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from codesmith.tools import (
     MAX_FILE_SIZE,
+    MAX_COMMAND_OUTPUT,
     ToolError,
     edit_file,
     execute_tool,
     list_files,
     read_file,
+    run_command,
     write_file,
 )
 
@@ -121,6 +125,59 @@ class FileToolsTest(unittest.TestCase):
             execute_tool(
                 "write_file", {"path": "new.txt", "content": 123}, self.workspace
             )
+
+    def test_run_python_script_returns_structured_result(self) -> None:
+        write_file(self.workspace, "hello.py", "print('hello from command')\n")
+        result = json.loads(run_command(self.workspace, ["python", "hello.py"]))
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["stdout"], "hello from command\n")
+        self.assertFalse(result["timed_out"])
+
+    def test_run_command_returns_nonzero_exit_code(self) -> None:
+        write_file(self.workspace, "fail.py", "raise SystemExit(3)\n")
+        result = json.loads(run_command(self.workspace, ["python", "fail.py"]))
+        self.assertEqual(result["exit_code"], 3)
+
+    def test_run_command_rejects_unknown_executable(self) -> None:
+        with self.assertRaisesRegex(ToolError, "只允许执行"):
+            run_command(self.workspace, ["powershell", "Get-ChildItem"])
+
+    def test_run_command_rejects_python_code_flag(self) -> None:
+        with self.assertRaisesRegex(ToolError, "python -c"):
+            run_command(self.workspace, ["python", "-c", "print('unsafe')"])
+
+    def test_run_command_rejects_parent_path(self) -> None:
+        with self.assertRaisesRegex(ToolError, "超出 workspace"):
+            run_command(self.workspace, ["python", "../outside.py"])
+
+    def test_run_command_times_out(self) -> None:
+        write_file(self.workspace, "slow.py", "import time\ntime.sleep(2)\n")
+        result = json.loads(
+            run_command(self.workspace, ["python", "slow.py"], timeout=1)
+        )
+        self.assertTrue(result["timed_out"])
+        self.assertIsNone(result["exit_code"])
+
+    def test_run_command_truncates_long_output(self) -> None:
+        write_file(
+            self.workspace,
+            "verbose.py",
+            f"print('x' * {MAX_COMMAND_OUTPUT + 100})\n",
+        )
+        result = json.loads(run_command(self.workspace, ["python", "verbose.py"]))
+        self.assertIn("已截断", result["stdout"])
+
+    def test_run_command_hides_api_key_from_child(self) -> None:
+        write_file(
+            self.workspace,
+            "environment.py",
+            "import os\nprint(os.getenv('DEEPSEEK_API_KEY', 'missing'))\n",
+        )
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "should-not-leak"}):
+            result = json.loads(
+                run_command(self.workspace, ["python", "environment.py"])
+            )
+        self.assertEqual(result["stdout"], "missing\n")
 
 
 if __name__ == "__main__":

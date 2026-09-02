@@ -2,7 +2,7 @@
 
 CodeSmith 是一个从零实现的轻量级本地 Coding Agent。它计划通过大语言模型理解编程任务，并在本地工作区内读取文件、修改代码和运行命令。
 
-项目不会使用 LangChain、LlamaIndex、OpenAI Agents SDK 等 Agent 框架。对话历史、上下文管理、工具执行、模型输出解析和 Agent Loop 等核心能力将在后续阶段自行实现。
+项目不会使用 LangChain、LlamaIndex、OpenAI Agents SDK 等 Agent 框架。对话历史、工具执行、模型输出解析、Agent Loop 和终止条件等核心能力均由项目自行实现。
 
 ## 当前开发状态
 
@@ -12,7 +12,7 @@ CodeSmith 是一个从零实现的轻量级本地 Coding Agent。它计划通过
 Python -> OpenAI Python SDK -> DeepSeek API -> 文本回复
 ```
 
-Agent 已能维护消息历史、回传 observation，并在 workspace 内读取、创建和精确修改文件；尚未实现命令执行。
+Agent 已能维护消息历史、回传 observation，在 workspace 内读写文件，并运行受限的 Python 测试命令。
 
 
 ## 安装依赖
@@ -37,7 +37,7 @@ copy .env.example .env
 - `DEEPSEEK_MODEL`：调用的模型名称
 - `WORKSPACE_PATH`：未来 Agent 可以操作的本地目录
 - `MAX_STEPS`：未来 Agent Loop 的最大步数
-- `COMMAND_TIMEOUT`：未来本地命令的超时时间（秒）
+- `COMMAND_TIMEOUT`：本地命令的超时时间（秒）
 
 ## 运行
 
@@ -53,7 +53,7 @@ python main.py
 python main.py --tool-demo "请列出当前工作区的文件"
 ```
 
-该模式只完成一次模型调用和一次工具执行，不会把工具结果再次发送给模型。
+该模式只完成一轮模型调用并执行该轮返回的工具调用，不会把工具结果再次发送给模型。
 
 运行 Agent Loop：
 
@@ -70,7 +70,7 @@ Agent 会持续进行“模型决策、工具执行、结果回传”，直到�
 - `codesmith/llm.py`：封装普通文本调用及单次 Tool Calling 响应解析
 - `codesmith/prompts.py`：保存简单系统提示词
 - `codesmith/agent.py`：维护消息历史、observation 回传和循环终止条件
-- `codesmith/tools.py`：实现受 workspace 边界保护的文件列举、读取、写入和精确编辑
+- `codesmith/tools.py`：实现受 workspace 边界保护的文件工具和受限命令执行
 - `workspace/`：未来 Agent 唯一允许操作目标代码的目录
 
 ## 运行测试
@@ -79,8 +79,10 @@ Agent 会持续进行“模型决策、工具执行、结果回传”，直到�
 python -m unittest discover -s tests -v
 ```
 
-测试覆盖 Agent Loop、最大步数、工具错误回传、响应解析、文件读写与精确替换、参数校验和 workspace 越界保护；测试不会调用真实 API。
+测试覆盖 Agent Loop、文件读写、精确替换、命令退出码、超时、输出截断、敏感环境清理和 workspace 越界保护；测试不会调用真实 API。
+
+`run_command` 当前只接受参数数组形式的 Python/pytest 命令，使用 `shell=False`，并拒绝绝对路径、父目录越界和 `python -c`。它是面向本地考核项目的安全护栏，不是操作系统级沙箱，不应运行来源不可信的项目。
 
 ## 后续计划
 
-建议下一步实现带工作目录限制、超时控制和输出截断的 `run_command`，让 Agent 能运行测试并根据结果继续修复。
+建议下一步完成一个端到端编程任务，补充必要的上下文与错误处理测试，并进行提交前安全检查。

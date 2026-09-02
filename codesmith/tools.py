@@ -4,10 +4,14 @@
 """
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 
 MAX_FILE_SIZE = 1_000_000
+MAX_COMMAND_OUTPUT = 10_000
 
 
 # 这里使用模型原生 Function Calling 所需的 JSON Schema，不依赖 Agent SDK。
@@ -95,6 +99,32 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
                     },
                 },
                 "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": (
+                "在 workspace 中运行受限的 Python 或 pytest 命令，并返回退出码、"
+                "标准输出和错误输出。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "description": (
+                            "命令参数数组，例如 ['python', '-m', 'unittest', "
+                            "'discover', '-s', 'tests', '-v']。"
+                        ),
+                    }
+                },
+                "required": ["command"],
                 "additionalProperties": False,
             },
         },
@@ -205,7 +235,125 @@ def edit_file(
     return f"已编辑 {relative_path}，替换 {replaced_count} 处。"
 
 
-def execute_tool(name: str, arguments: dict[str, object], workspace: Path) -> str:
+def run_command(
+    workspace: Path, command: list[str], timeout: int = 60
+) -> str:
+    """在 workspace 中以非 shell 方式运行受限命令。"""
+    workspace = workspace.resolve()
+    if not workspace.is_dir():
+        raise ToolError(f"工作区不存在或不是目录：{workspace}")
+    if not command or not all(isinstance(argument, str) for argument in command):
+        raise ToolError("run_command 需要非空字符串数组 command。")
+    if timeout <= 0:
+        raise ToolError("命令超时时间必须大于 0。")
+
+    safe_command = _build_safe_command(workspace, command)
+    environment = _sanitized_environment()
+
+    try:
+        completed = subprocess.run(
+            safe_command,
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            shell=False,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired as error:
+        result = {
+            "exit_code": None,
+            "stdout": _truncate_output(error.stdout or ""),
+            "stderr": _truncate_output(error.stderr or ""),
+            "timed_out": True,
+            "message": f"命令执行超过 {timeout} 秒，已终止。",
+        }
+        return json.dumps(result, ensure_ascii=False)
+    except OSError as error:
+        raise ToolError(f"启动命令失败：{error}") from error
+
+    result = {
+        "exit_code": completed.returncode,
+        "stdout": _truncate_output(completed.stdout),
+        "stderr": _truncate_output(completed.stderr),
+        "timed_out": False,
+    }
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _build_safe_command(workspace: Path, command: list[str]) -> list[str]:
+    """将允许的用户命令转换为不经过 shell 的实际参数。"""
+    executable = command[0].lower()
+    arguments = command[1:]
+    _reject_unsafe_command_arguments(arguments)
+
+    if executable in {"pytest", "pytest.exe"}:
+        return [sys.executable, "-m", "pytest", *arguments]
+
+    if executable not in {"python", "python.exe"}:
+        raise ToolError("当前只允许执行 python 或 pytest 命令。")
+    if not arguments:
+        raise ToolError("python 命令缺少脚本或模块参数。")
+
+    first_argument = arguments[0]
+    if first_argument == "--version" and len(arguments) == 1:
+        return [sys.executable, "--version"]
+    if first_argument == "-c":
+        raise ToolError("出于安全考虑，不允许使用 python -c。")
+    if first_argument == "-m":
+        if len(arguments) < 2 or arguments[1] not in {"unittest", "pytest"}:
+            raise ToolError("python -m 当前只允许 unittest 或 pytest。")
+        return [sys.executable, *arguments]
+
+    script_path = _resolve_workspace_path(workspace, first_argument)
+    if script_path.suffix.lower() != ".py" or not script_path.is_file():
+        raise ToolError("python 只能运行 workspace 内已存在的 .py 文件。")
+    return [sys.executable, str(script_path), *arguments[1:]]
+
+
+def _reject_unsafe_command_arguments(arguments: list[str]) -> None:
+    """拒绝可能把命令指向 workspace 外部的明显路径参数。"""
+    for argument in arguments:
+        if "\x00" in argument or "\n" in argument or "\r" in argument:
+            raise ToolError("命令参数包含非法控制字符。")
+        if argument in {"|", "&", ";", ">", ">>", "<"}:
+            raise ToolError("命令不支持 shell 运算符。")
+
+        path_candidate = argument.split("=", 1)[-1]
+        candidate_path = Path(path_candidate)
+        if candidate_path.is_absolute() or ".." in candidate_path.parts:
+            raise ToolError("命令参数不得使用绝对路径或超出 workspace。")
+
+
+def _sanitized_environment() -> dict[str, str]:
+    """复制进程环境，但不把 API Key 等敏感变量交给待运行代码。"""
+    environment = os.environ.copy()
+    sensitive_markers = ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")
+    for name in list(environment):
+        if any(marker in name.upper() for marker in sensitive_markers):
+            environment.pop(name)
+    return environment
+
+
+def _truncate_output(output: str | bytes) -> str:
+    # TimeoutExpired 在部分 Python 版本中即使 text=True 也可能携带 bytes。
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    if len(output) <= MAX_COMMAND_OUTPUT:
+        return output
+    omitted = len(output) - MAX_COMMAND_OUTPUT
+    return f"{output[:MAX_COMMAND_OUTPUT]}\n... 已截断 {omitted} 个字符 ..."
+
+
+def execute_tool(
+    name: str,
+    arguments: dict[str, object],
+    workspace: Path,
+    command_timeout: int = 60,
+) -> str:
     """校验模型生成的参数，执行一个已注册工具并返回文本结果。"""
     if name == "list_files":
         _reject_unknown_arguments(arguments, {"path"})
@@ -251,6 +399,15 @@ def execute_tool(name: str, arguments: dict[str, object], workspace: Path) -> st
             workspace, relative_path, old_text, new_text, replace_all
         )
 
+    if name == "run_command":
+        _reject_unknown_arguments(arguments, {"command"})
+        command = arguments.get("command")
+        if not isinstance(command, list) or not all(
+            isinstance(argument, str) for argument in command
+        ):
+            raise ToolError("run_command 的 command 参数必须是字符串数组。")
+        return run_command(workspace, command, command_timeout)
+
     raise ToolError(f"未知工具：{name}")
 
 
@@ -261,6 +418,3 @@ def _reject_unknown_arguments(
     if unknown_names:
         names = ", ".join(sorted(unknown_names))
         raise ToolError(f"包含未知工具参数：{names}")
-
-
-# TODO: 后续实现带超时和安全限制的 run_command。

@@ -29,8 +29,8 @@ class AgentLoopTest(unittest.TestCase):
 
     def test_tool_observation_is_returned_to_model(self) -> None:
         replies = [
-            ModelReply(None, ToolCall("call_1", "read_file", {"path": "hello.txt"})),
-            ModelReply("文件内容是 hello。", None),
+            ModelReply(None, (ToolCall("call_1", "read_file", {"path": "hello.txt"}),)),
+            ModelReply("文件内容是 hello。", ()),
         ]
         message_snapshots: list[list[dict[str, object]]] = []
 
@@ -53,8 +53,8 @@ class AgentLoopTest(unittest.TestCase):
 
     def test_tool_error_becomes_observation(self) -> None:
         replies = [
-            ModelReply(None, ToolCall("call_1", "unknown_tool", {})),
-            ModelReply("工具不可用，任务结束。", None),
+            ModelReply(None, (ToolCall("call_1", "unknown_tool", {}),)),
+            ModelReply("工具不可用，任务结束。", ()),
         ]
         observations: list[str] = []
 
@@ -73,7 +73,7 @@ class AgentLoopTest(unittest.TestCase):
         limited_settings = Settings(
             **{**self.settings.__dict__, "max_steps": 2}
         )
-        reply = ModelReply(None, ToolCall("call_1", "list_files", {}))
+        reply = ModelReply(None, (ToolCall("call_1", "list_files", {}),))
         with patch("codesmith.agent.complete_with_tools", return_value=reply):
             with self.assertRaisesRegex(AgentError, "MAX_STEPS=2"):
                 run_agent("不断列出文件", limited_settings)
@@ -81,6 +81,26 @@ class AgentLoopTest(unittest.TestCase):
     def test_empty_task_is_rejected(self) -> None:
         with self.assertRaisesRegex(AgentError, "不能为空"):
             run_agent("   ", self.settings)
+
+    def test_multiple_tool_calls_are_executed_in_order(self) -> None:
+        replies = [
+            ModelReply(
+                None,
+                (
+                    ToolCall("call_1", "write_file", {"path": "a.txt", "content": "A"}),
+                    ToolCall("call_2", "write_file", {"path": "b.txt", "content": "B"}),
+                ),
+            ),
+            ModelReply("两个文件已创建。", ()),
+        ]
+        with patch("codesmith.agent.complete_with_tools", side_effect=replies):
+            result = run_agent("创建两个文件", self.settings)
+
+        self.assertEqual([item.name for item in result.tool_executions], [
+            "write_file", "write_file"
+        ])
+        self.assertEqual((self.workspace / "a.txt").read_text(encoding="utf-8"), "A")
+        self.assertEqual((self.workspace / "b.txt").read_text(encoding="utf-8"), "B")
 
 
 if __name__ == "__main__":

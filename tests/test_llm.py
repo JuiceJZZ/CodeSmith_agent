@@ -42,8 +42,8 @@ class ToolCallingParsingTest(unittest.TestCase):
             reply = chat_with_tools("读取 a.py", self.settings)
 
         self.assertIsNone(reply.content)
-        self.assertEqual(reply.tool_call.name, "read_file")
-        self.assertEqual(reply.tool_call.arguments, {"path": "a.py"})
+        self.assertEqual(reply.tool_calls[0].name, "read_file")
+        self.assertEqual(reply.tool_calls[0].arguments, {"path": "a.py"})
         request = client.chat.completions.create.call_args.kwargs
         self.assertEqual(request["tools"], TOOL_DEFINITIONS)
         self.assertEqual(request["tool_choice"], "auto")
@@ -54,7 +54,7 @@ class ToolCallingParsingTest(unittest.TestCase):
             reply = chat_with_tools("你好", self.settings)
 
         self.assertEqual(reply.content, "不需要查看文件。")
-        self.assertIsNone(reply.tool_call)
+        self.assertEqual(reply.tool_calls, ())
 
     def test_rejects_invalid_tool_arguments_json(self) -> None:
         client = self._mock_client(_response(tool_calls=[_tool_call("not-json")]))
@@ -68,12 +68,16 @@ class ToolCallingParsingTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "JSON 对象"):
                 chat_with_tools("读取文件", self.settings)
 
-    def test_rejects_multiple_tool_calls(self) -> None:
-        calls = [_tool_call("{}", "list_files", "call_1"), _tool_call("{}")]
+    def test_parses_multiple_tool_calls(self) -> None:
+        calls = [
+            _tool_call("{}", "list_files", "call_1"),
+            _tool_call("{}", "read_file", "call_2"),
+        ]
         client = self._mock_client(_response(tool_calls=calls))
         with patch("codesmith.llm.create_client", return_value=client):
-            with self.assertRaisesRegex(RuntimeError, "只支持一个"):
-                chat_with_tools("查看项目", self.settings)
+            reply = chat_with_tools("查看项目", self.settings)
+        self.assertEqual([call.call_id for call in reply.tool_calls], ["call_1", "call_2"])
+        self.assertEqual([call.name for call in reply.tool_calls], ["list_files", "read_file"])
 
 
 if __name__ == "__main__":

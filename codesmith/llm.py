@@ -21,10 +21,10 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class ModelReply:
-    """模型的一次回复：普通文本或一个工具调用。"""
+    """模型的一次回复：普通文本或零到多个工具调用。"""
 
     content: str | None
-    tool_call: ToolCall | None
+    tool_calls: tuple[ToolCall, ...]
 
 
 def create_client(settings: Settings) -> OpenAI:
@@ -53,7 +53,7 @@ def chat(user_message: str, settings: Settings) -> str:
 
 
 def chat_with_tools(user_message: str, settings: Settings) -> ModelReply:
-    """让模型进行一次决策，并解析普通文本或单个工具调用。"""
+    """让模型进行一次决策，并解析普通文本或多个工具调用。"""
     messages: list[dict[str, object]] = [
         {"role": "system", "content": TOOL_SYSTEM_PROMPT},
         {"role": "user", "content": user_message},
@@ -75,25 +75,26 @@ def complete_with_tools(
 
     message = response.choices[0].message
     raw_tool_calls = message.tool_calls or []
-    if len(raw_tool_calls) > 1:
-        raise RuntimeError("当前阶段每次只支持一个工具调用，但模型返回了多个。")
 
     if not raw_tool_calls:
         if not message.content:
             raise RuntimeError("模型既没有返回文本，也没有返回工具调用。")
-        return ModelReply(content=message.content, tool_call=None)
+        return ModelReply(content=message.content, tool_calls=())
 
-    raw_tool_call = raw_tool_calls[0]
-    try:
-        arguments = json.loads(raw_tool_call.function.arguments)
-    except json.JSONDecodeError as error:
-        raise RuntimeError("模型返回的工具参数不是有效 JSON。") from error
-    if not isinstance(arguments, dict):
-        raise RuntimeError("模型返回的工具参数必须是 JSON 对象。")
+    tool_calls: list[ToolCall] = []
+    for raw_tool_call in raw_tool_calls:
+        try:
+            arguments = json.loads(raw_tool_call.function.arguments)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("模型返回的工具参数不是有效 JSON。") from error
+        if not isinstance(arguments, dict):
+            raise RuntimeError("模型返回的工具参数必须是 JSON 对象。")
 
-    tool_call = ToolCall(
-        call_id=raw_tool_call.id,
-        name=raw_tool_call.function.name,
-        arguments=arguments,
-    )
-    return ModelReply(content=message.content, tool_call=tool_call)
+        tool_calls.append(
+            ToolCall(
+                call_id=raw_tool_call.id,
+                name=raw_tool_call.function.name,
+                arguments=arguments,
+            )
+        )
+    return ModelReply(content=message.content, tool_calls=tuple(tool_calls))

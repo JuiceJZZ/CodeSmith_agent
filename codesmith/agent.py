@@ -37,7 +37,7 @@ class AgentResult:
 
 
 def _assistant_tool_message(
-    tool_call: ToolCall, content: str | None
+    tool_calls: tuple[ToolCall, ...], content: str | None
 ) -> dict[str, object]:
     """构造需要写入历史的 assistant tool-call 消息。"""
     return {
@@ -52,6 +52,7 @@ def _assistant_tool_message(
                     "arguments": json.dumps(tool_call.arguments, ensure_ascii=False),
                 },
             }
+            for tool_call in tool_calls
         ],
     }
 
@@ -69,34 +70,38 @@ def run_agent(task: str, settings: Settings) -> AgentResult:
 
     for step in range(1, settings.max_steps + 1):
         reply = complete_with_tools(messages, settings)
-        if reply.tool_call is None:
+        if not reply.tool_calls:
             final_answer = reply.content
             if not final_answer:
                 raise AgentError("模型返回了空的最终答案。")
             messages.append({"role": "assistant", "content": final_answer})
             return AgentResult(final_answer, step, tuple(executions))
 
-        tool_call = reply.tool_call
-        messages.append(_assistant_tool_message(tool_call, reply.content))
+        messages.append(_assistant_tool_message(reply.tool_calls, reply.content))
 
-        try:
-            observation = execute_tool(
-                tool_call.name, tool_call.arguments, settings.workspace_path
+        # 模型可能在一轮中返回多个调用；本地按顺序执行，便于观察和复现。
+        for tool_call in reply.tool_calls:
+            try:
+                observation = execute_tool(
+                    tool_call.name,
+                    tool_call.arguments,
+                    settings.workspace_path,
+                    settings.command_timeout,
+                )
+            except ToolError as error:
+                # 工具参数错误也属于模型可观察的信息，让下一轮有机会修正。
+                observation = f"工具执行失败：{error}"
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.call_id,
+                    "content": observation,
+                }
             )
-        except ToolError as error:
-            # 工具参数错误也属于模型可观察的信息，让下一轮有机会修正。
-            observation = f"工具执行失败：{error}"
-
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tool_call.call_id,
-                "content": observation,
-            }
-        )
-        executions.append(
-            ToolExecution(step, tool_call.name, tool_call.arguments, observation)
-        )
+            executions.append(
+                ToolExecution(step, tool_call.name, tool_call.arguments, observation)
+            )
 
     raise AgentError(
         f"已达到最大步骤数 MAX_STEPS={settings.max_steps}，任务仍未结束。"

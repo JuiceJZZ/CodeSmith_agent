@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument(
         "--tool-demo",
         metavar="TASK",
-        help="让模型针对任务选择并执行一次工具，然后结束。",
+        help="执行一轮模型决策及其返回的工具调用，然后结束。",
     )
     mode.add_argument(
         "--agent",
@@ -30,17 +30,22 @@ def run_tool_demo(task: str) -> int:
     settings = load_settings()
     reply = chat_with_tools(task, settings)
 
-    if reply.tool_call is None:
+    if not reply.tool_calls:
         print("模型没有调用工具，直接回复：")
         print(reply.content)
         return 0
 
-    tool_call = reply.tool_call
-    print(f"模型选择工具：{tool_call.name}")
-    print(f"工具参数：{tool_call.arguments}")
-    result = execute_tool(tool_call.name, tool_call.arguments, settings.workspace_path)
-    print("工具结果：")
-    print(result)
+    for tool_call in reply.tool_calls:
+        print(f"模型选择工具：{tool_call.name}")
+        print(f"工具参数：{tool_call.arguments}")
+        result = execute_tool(
+            tool_call.name,
+            tool_call.arguments,
+            settings.workspace_path,
+            settings.command_timeout,
+        )
+        print("工具结果：")
+        print(result)
     print("\n单轮演示结束：工具结果尚未回传给模型。")
     return 0
 
