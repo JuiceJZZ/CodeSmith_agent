@@ -6,13 +6,13 @@ CodeSmith 是一个从零实现的轻量级本地 Coding Agent。它计划通过
 
 ## 当前开发状态
 
-目前只完成最小项目骨架和 DeepSeek 文本调用，用于验证以下链路：
+目前已完成最小项目骨架、DeepSeek 文本调用和两个本地只读工具，用于逐步验证 Coding Agent 的基础组件。
 
 ```text
 Python -> OpenAI Python SDK -> DeepSeek API -> 文本回复
 ```
 
-当前尚未实现 Agent Loop、Tool Calling、文件修改或命令执行。
+当前尚未实现 Agent Loop、模型 Tool Calling、文件修改或命令执行。
 
 
 ## 安装依赖
@@ -54,9 +54,17 @@ python main.py
 - `codesmith/llm.py`：封装一次普通文本模型调用
 - `codesmith/prompts.py`：保存简单系统提示词
 - `codesmith/agent.py`：预留 Agent Loop 模块
-- `codesmith/tools.py`：预留本地工具模块
+- `codesmith/tools.py`：实现受 workspace 边界保护的 `list_files` 和 `read_file`
 - `workspace/`：未来 Agent 唯一允许操作目标代码的目录
+
+## 运行测试
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+测试覆盖目录列举、UTF-8 文件读取、绝对路径拒绝、父目录越界、缺失文件和非文本文件等情况。
 
 ## 后续计划
 
-建议按以下顺序逐步实现：本地只读工具、工具参数校验、模型 Tool Calling、对话历史、最小 Agent Loop、写文件与命令工具、安全边界、错误处理和测试。
+建议下一步实现模型原生 Tool Calling 的单次调用与输出解析；确认数据结构后，再加入对话历史和最小 Agent Loop。
