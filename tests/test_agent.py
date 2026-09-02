@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from codesmith.agent import MAX_OBSERVATION_CHARS, AgentError, run_agent
+from codesmith.agent import (
+    MAX_OBSERVATION_CHARS,
+    MAX_REPEATED_TOOL_FAILURES,
+    AgentError,
+    run_agent,
+)
 from codesmith.config import Settings
 from codesmith.llm import ModelReply, ToolCall
 
@@ -140,6 +145,17 @@ class AgentLoopTest(unittest.TestCase):
         with patch("codesmith.agent.complete_with_tools", side_effect=replies):
             run_agent("回答任务", self.settings, on_model_step=lambda step, limit: progress.append((step, limit)))
         self.assertEqual(progress, [(1, self.settings.max_steps)])
+
+    def test_repeated_identical_tool_failure_stops_early(self) -> None:
+        failing_reply = ModelReply(
+            None, (ToolCall("call_1", "run_command", {"command": "bad"}),)
+        )
+        with patch(
+            "codesmith.agent.complete_with_tools", return_value=failing_reply
+        ) as complete:
+            with self.assertRaisesRegex(AgentError, "连续 3 次"):
+                run_agent("运行命令", self.settings)
+        self.assertEqual(complete.call_count, MAX_REPEATED_TOOL_FAILURES)
 
 
 if __name__ == "__main__":

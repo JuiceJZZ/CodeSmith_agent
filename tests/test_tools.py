@@ -11,6 +11,7 @@ from codesmith.tools import (
     MAX_FILE_SIZE,
     MAX_COMMAND_OUTPUT,
     ToolError,
+    delete_file,
     edit_file,
     execute_tool,
     list_files,
@@ -72,7 +73,7 @@ class FileToolsTest(unittest.TestCase):
 
     def test_execute_tool_rejects_unknown_tool(self) -> None:
         with self.assertRaisesRegex(ToolError, "未知工具"):
-            execute_tool("delete_file", {"path": "说明.txt"}, self.workspace)
+            execute_tool("unknown_tool", {"path": "说明.txt"}, self.workspace)
 
     def test_execute_tool_rejects_unknown_argument(self) -> None:
         with self.assertRaisesRegex(ToolError, "未知工具参数"):
@@ -183,6 +184,40 @@ class FileToolsTest(unittest.TestCase):
         write_file(self.workspace, "chinese.py", "print('中文输出正常')\n")
         result = json.loads(run_command(self.workspace, ["python", "chinese.py"]))
         self.assertEqual(result["stdout"], "中文输出正常\n")
+
+    def test_execute_command_accepts_json_encoded_array(self) -> None:
+        result = json.loads(
+            execute_tool(
+                "run_command",
+                {"command": '["python", "--version"]'},
+                self.workspace,
+            )
+        )
+        self.assertEqual(result["exit_code"], 0)
+
+    def test_json_encoded_python_without_target_has_clear_error(self) -> None:
+        with self.assertRaisesRegex(ToolError, "缺少脚本或模块参数"):
+            execute_tool(
+                "run_command", {"command": '["python"]'}, self.workspace
+            )
+
+    def test_invalid_json_encoded_command_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ToolError, "不是有效的 JSON 数组"):
+            execute_tool("run_command", {"command": "[python"}, self.workspace)
+
+    def test_delete_file_removes_workspace_file(self) -> None:
+        write_file(self.workspace, "temporary.txt", "temporary")
+        result = delete_file(self.workspace, "temporary.txt")
+        self.assertIn("已删除文件", result)
+        self.assertFalse((self.workspace / "temporary.txt").exists())
+
+    def test_delete_file_rejects_directory(self) -> None:
+        with self.assertRaisesRegex(ToolError, "目标不是文件"):
+            delete_file(self.workspace, "src")
+
+    def test_delete_file_rejects_workspace_escape(self) -> None:
+        with self.assertRaisesRegex(ToolError, "超出 workspace"):
+            delete_file(self.workspace, "../outside.txt")
 
 
 if __name__ == "__main__":

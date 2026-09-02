@@ -9,7 +9,7 @@ CodeSmith 是一个从零实现的轻量级本地 Coding Agent。它通过 DeepS
 目前已完成 DeepSeek Tool Calling、本地文件工具、受限命令执行、消息历史、上下文限制和受步骤限制的 Agent Loop。
 
 ```text
-Python -> OpenAI Python SDK -> DeepSeek API -> 文本回复
+用户任务 → 模型决策 → 工具调用 → 本地执行 → observation 回传 → 模型再决策 → ... → 最终答案
 ```
 
 Agent 已能维护消息历史、回传 observation，在 workspace 内读写文件，并运行受限的 Python 测试命令。
@@ -18,14 +18,6 @@ Agent 已能维护消息历史、回传 observation，在 workspace 内读写文
 
 - Python 3.11
 - DeepSeek API（默认模型 `deepseek-v4-flash`）
-
-创建并激活 Conda 环境：
-
-```bash
-conda create -n codesmith python=3.11
-conda activate codesmith
-```
-
 
 ## 安装依赖
 
@@ -48,8 +40,10 @@ copy .env.example .env
 - `DEEPSEEK_BASE_URL`：DeepSeek OpenAI 兼容接口地址
 - `DEEPSEEK_MODEL`：调用的模型名称
 - `WORKSPACE_PATH`：Agent 可以操作的本地目录
-- `MAX_STEPS`：Agent Loop 的最大模型调用轮数，默认 15
+- `MAX_STEPS`：Agent Loop 的最大模型调用轮数，默认 25
 - `COMMAND_TIMEOUT`：本地命令的超时时间（秒）
+
+
 
 ## 运行
 
@@ -92,9 +86,11 @@ Agent 会持续进行“模型决策、工具执行、结果回传”，直到�
 - `codesmith/llm.py`：封装模型调用及 Tool Calling 响应解析
 - `codesmith/prompts.py`：保存系统提示词
 - `codesmith/agent.py`：维护消息历史、observation 限制、结果回传和循环终止
-- `codesmith/tools.py`：实现受 workspace 边界保护的文件工具和受限命令执行
+- `codesmith/tools.py`：实现受 workspace 边界保护的文件工具、文件删除和受限命令执行
 - `workspace/`：Agent 唯一允许操作目标代码的目录
 - `tests/`：不访问真实模型的单元测试
+
+
 
 ## 运行测试
 
@@ -105,6 +101,8 @@ python -m unittest discover -s tests -v
 测试覆盖 Agent Loop、CLI、上下文截断、文件读写、命令退出码、超时、输出截断、敏感环境清理和 workspace 越界保护；单元测试不会调用真实 API。
 
 `run_command` 当前只接受参数数组形式的 Python/pytest 命令，使用 `shell=False`，并拒绝绝对路径、父目录越界和 `python -c`。它是面向本地考核项目的安全护栏，不是操作系统级沙箱，不应运行来源不可信的项目。
+
+模型偶尔会把命令数组二次编码成 JSON 字符串，执行器会在校验后兼容解析。若同一工具连续三次产生完全相同的错误，Agent 会提前停止，避免持续消耗 API。删除文件应使用 `delete_file`，而不是生成临时清理脚本。
 
 ### Windows 终端乱码
 

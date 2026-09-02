@@ -15,6 +15,7 @@ from codesmith.tools import ToolError, execute_tool
 
 
 MAX_OBSERVATION_CHARS = 30_000
+MAX_REPEATED_TOOL_FAILURES = 3
 
 
 class AgentError(RuntimeError):
@@ -86,6 +87,8 @@ def run_agent(
         {"role": "user", "content": task},
     ]
     executions: list[ToolExecution] = []
+    last_failure: tuple[str, str] | None = None
+    repeated_failure_count = 0
 
     for step in range(1, settings.max_steps + 1):
         if on_model_step is not None:
@@ -128,6 +131,23 @@ def run_agent(
             executions.append(execution)
             if on_tool_execution is not None:
                 on_tool_execution(execution)
+
+            if observation.startswith("工具执行失败："):
+                failure = (tool_call.name, observation)
+                if failure == last_failure:
+                    repeated_failure_count += 1
+                else:
+                    last_failure = failure
+                    repeated_failure_count = 1
+
+                if repeated_failure_count >= MAX_REPEATED_TOOL_FAILURES:
+                    raise AgentError(
+                        f"工具 {tool_call.name} 连续 {repeated_failure_count} 次"
+                        f"产生相同错误，已提前停止：{observation}"
+                    )
+            else:
+                last_failure = None
+                repeated_failure_count = 0
 
     raise AgentError(
         f"已达到最大步骤数 MAX_STEPS={settings.max_steps}，任务仍未结束；"

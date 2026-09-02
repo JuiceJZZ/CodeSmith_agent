@@ -129,6 +129,24 @@ TOOL_DEFINITIONS: list[dict[str, object]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "删除 workspace 内的单个文件，不支持删除目录。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "相对于 workspace 的文件路径。",
+                    }
+                },
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 
@@ -233,6 +251,21 @@ def edit_file(
     write_file(workspace, relative_path, updated)
     replaced_count = match_count if replace_all else 1
     return f"已编辑 {relative_path}，替换 {replaced_count} 处。"
+
+
+def delete_file(workspace: Path, relative_path: str) -> str:
+    """删除 workspace 内的单个文件，拒绝目录和越界路径。"""
+    file_path = _resolve_workspace_path(workspace, relative_path)
+    if not file_path.exists():
+        raise ToolError(f"文件不存在：{relative_path}")
+    if not file_path.is_file():
+        raise ToolError(f"目标不是文件，不能删除：{relative_path}")
+
+    try:
+        file_path.unlink()
+    except OSError as error:
+        raise ToolError(f"删除文件失败：{relative_path}；{error}") from error
+    return f"已删除文件：{relative_path}"
 
 
 def run_command(
@@ -402,16 +435,37 @@ def execute_tool(
             workspace, relative_path, old_text, new_text, replace_all
         )
 
+    if name == "delete_file":
+        _reject_unknown_arguments(arguments, {"path"})
+        relative_path = arguments.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            raise ToolError("delete_file 需要非空字符串 path 参数。")
+        return delete_file(workspace, relative_path)
+
     if name == "run_command":
         _reject_unknown_arguments(arguments, {"command"})
-        command = arguments.get("command")
-        if not isinstance(command, list) or not all(
-            isinstance(argument, str) for argument in command
-        ):
-            raise ToolError("run_command 的 command 参数必须是字符串数组。")
+        command = _parse_command_argument(arguments.get("command"))
         return run_command(workspace, command, command_timeout)
 
     raise ToolError(f"未知工具：{name}")
+
+
+def _parse_command_argument(value: object) -> list[str]:
+    """兼容模型偶尔把 command 数组二次编码成 JSON 字符串的情况。"""
+    parsed_value = value
+    if isinstance(value, str):
+        try:
+            parsed_value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ToolError(
+                "run_command 的 command 字符串不是有效的 JSON 数组。"
+            ) from error
+
+    if not isinstance(parsed_value, list) or not all(
+        isinstance(argument, str) for argument in parsed_value
+    ):
+        raise ToolError("run_command 的 command 参数必须是字符串数组。")
+    return parsed_value
 
 
 def _reject_unknown_arguments(

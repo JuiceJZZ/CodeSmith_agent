@@ -13,6 +13,10 @@
 .vscode/
 .cursor/
 
+# workspace 内容由 Agent 动态生成，不提交；保留目录本身
+workspace/*
+!workspace/.gitkeep
+
 # Local temporary files
 tmp/
 
