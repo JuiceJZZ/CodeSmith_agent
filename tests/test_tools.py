@@ -179,6 +179,11 @@ class FileToolsTest(unittest.TestCase):
             )
         self.assertEqual(result["stdout"], "missing\n")
 
+    def test_run_command_preserves_chinese_output(self) -> None:
+        write_file(self.workspace, "chinese.py", "print('中文输出正常')\n")
+        result = json.loads(run_command(self.workspace, ["python", "chinese.py"]))
+        self.assertEqual(result["stdout"], "中文输出正常\n")
+
 
 if __name__ == "__main__":
     unittest.main()

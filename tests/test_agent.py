@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from codesmith.agent import AgentError, run_agent
+from codesmith.agent import MAX_OBSERVATION_CHARS, AgentError, run_agent
 from codesmith.config import Settings
 from codesmith.llm import ModelReply, ToolCall
 
@@ -101,6 +101,45 @@ class AgentLoopTest(unittest.TestCase):
         ])
         self.assertEqual((self.workspace / "a.txt").read_text(encoding="utf-8"), "A")
         self.assertEqual((self.workspace / "b.txt").read_text(encoding="utf-8"), "B")
+
+    def test_long_observation_is_truncated_before_model_call(self) -> None:
+        replies = [
+            ModelReply(None, (ToolCall("call_1", "read_file", {"path": "big.txt"}),)),
+            ModelReply("已收到截断结果。", ()),
+        ]
+        snapshots: list[list[dict[str, object]]] = []
+
+        def fake_complete(messages, settings):
+            snapshots.append([dict(message) for message in messages])
+            return replies.pop(0)
+
+        with (
+            patch("codesmith.agent.complete_with_tools", side_effect=fake_complete),
+            patch("codesmith.agent.execute_tool", return_value="x" * 50_000),
+        ):
+            run_agent("读取大文件", self.settings)
+
+        observation = str(snapshots[1][-1]["content"])
+        self.assertLessEqual(len(observation), MAX_OBSERVATION_CHARS)
+        self.assertIn("observation 已截断", observation)
+
+    def test_tool_execution_callback_receives_trace(self) -> None:
+        replies = [
+            ModelReply(None, (ToolCall("call_1", "list_files", {}),)),
+            ModelReply("完成。", ()),
+        ]
+        received = []
+        with patch("codesmith.agent.complete_with_tools", side_effect=replies):
+            run_agent("列出文件", self.settings, on_tool_execution=received.append)
+        self.assertEqual(len(received), 1)
+        self.assertEqual(received[0].name, "list_files")
+
+    def test_model_step_callback_receives_progress(self) -> None:
+        replies = [ModelReply("完成。", ())]
+        progress = []
+        with patch("codesmith.agent.complete_with_tools", side_effect=replies):
+            run_agent("回答任务", self.settings, on_model_step=lambda step, limit: progress.append((step, limit)))
+        self.assertEqual(progress, [(1, self.settings.max_steps)])
 
 
 if __name__ == "__main__":

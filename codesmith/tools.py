@@ -335,6 +335,9 @@ def _sanitized_environment() -> dict[str, str]:
     for name in list(environment):
         if any(marker in name.upper() for marker in sensitive_markers):
             environment.pop(name)
+    # 父进程固定按 UTF-8 解码，因此也要求 Python 子进程使用 UTF-8 输出。
+    environment["PYTHONIOENCODING"] = "utf-8"
+    environment["PYTHONUTF8"] = "1"
     return environment
 
 

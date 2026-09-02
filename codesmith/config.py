@@ -78,6 +78,6 @@ def load_settings() -> Settings:
         workspace_path=_resolve_workspace(
             os.getenv("WORKSPACE_PATH", "workspace").strip()
         ),
-        max_steps=_read_positive_int("MAX_STEPS", 10),
+        max_steps=_read_positive_int("MAX_STEPS", 15),
         command_timeout=_read_positive_int("COMMAND_TIMEOUT", 60),
     )
