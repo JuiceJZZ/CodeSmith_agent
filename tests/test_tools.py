@@ -1,4 +1,4 @@
-"""只读本地工具的单元测试。"""
+"""本地文件工具的单元测试。"""
 
 import json
 import tempfile
@@ -8,13 +8,15 @@ from pathlib import Path
 from codesmith.tools import (
     MAX_FILE_SIZE,
     ToolError,
+    edit_file,
     execute_tool,
     list_files,
     read_file,
+    write_file,
 )
 
 
-class ReadOnlyToolsTest(unittest.TestCase):
+class FileToolsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.workspace = Path(self.temporary_directory.name)
@@ -71,6 +73,54 @@ class ReadOnlyToolsTest(unittest.TestCase):
     def test_execute_tool_rejects_unknown_argument(self) -> None:
         with self.assertRaisesRegex(ToolError, "未知工具参数"):
             execute_tool("read_file", {"path": "说明.txt", "extra": True}, self.workspace)
+
+    def test_write_file_creates_parent_directories(self) -> None:
+        result = write_file(self.workspace, "new/package/app.py", "print('ok')\n")
+        self.assertIn("已写入", result)
+        self.assertEqual(
+            (self.workspace / "new" / "package" / "app.py").read_text(
+                encoding="utf-8"
+            ),
+            "print('ok')\n",
+        )
+
+    def test_write_file_can_overwrite_existing_file(self) -> None:
+        write_file(self.workspace, "说明.txt", "新内容")
+        self.assertEqual(read_file(self.workspace, "说明.txt"), "新内容")
+
+    def test_write_file_rejects_workspace_escape(self) -> None:
+        with self.assertRaisesRegex(ToolError, "超出 workspace"):
+            write_file(self.workspace, "../outside.txt", "blocked")
+
+    def test_write_file_rejects_large_content(self) -> None:
+        with self.assertRaisesRegex(ToolError, "超过"):
+            write_file(self.workspace, "large.txt", "a" * (MAX_FILE_SIZE + 1))
+
+    def test_edit_file_replaces_one_exact_match(self) -> None:
+        result = edit_file(self.workspace, "说明.txt", "CodeSmith", "Agent")
+        self.assertIn("替换 1 处", result)
+        self.assertEqual(read_file(self.workspace, "说明.txt"), "你好，Agent！")
+
+    def test_edit_file_rejects_ambiguous_match(self) -> None:
+        write_file(self.workspace, "repeat.txt", "same same")
+        with self.assertRaisesRegex(ToolError, "出现 2 次"):
+            edit_file(self.workspace, "repeat.txt", "same", "new")
+        self.assertEqual(read_file(self.workspace, "repeat.txt"), "same same")
+
+    def test_edit_file_can_replace_all_matches(self) -> None:
+        write_file(self.workspace, "repeat.txt", "same same")
+        edit_file(self.workspace, "repeat.txt", "same", "new", replace_all=True)
+        self.assertEqual(read_file(self.workspace, "repeat.txt"), "new new")
+
+    def test_edit_file_rejects_missing_text(self) -> None:
+        with self.assertRaisesRegex(ToolError, "没有找到"):
+            edit_file(self.workspace, "说明.txt", "missing", "new")
+
+    def test_execute_write_file_validates_content_type(self) -> None:
+        with self.assertRaisesRegex(ToolError, "content 参数必须是字符串"):
+            execute_tool(
+                "write_file", {"path": "new.txt", "content": 123}, self.workspace
+            )
 
 
 if __name__ == "__main__":

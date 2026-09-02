@@ -57,7 +57,7 @@ def _assistant_tool_message(
 
 
 def run_agent(task: str, settings: Settings) -> AgentResult:
-    """运行受 MAX_STEPS 限制的只读 Agent Loop。"""
+    """运行受 MAX_STEPS 限制的 Agent Loop。"""
     if not task.strip():
         raise AgentError("编程任务不能为空。")
 

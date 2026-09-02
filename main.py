@@ -15,12 +15,12 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument(
         "--tool-demo",
         metavar="TASK",
-        help="让模型针对任务选择并执行一次只读工具，然后结束。",
+        help="让模型针对任务选择并执行一次工具，然后结束。",
     )
     mode.add_argument(
         "--agent",
         metavar="TASK",
-        help="运行带消息历史和步骤限制的只读 Agent Loop。",
+        help="运行带消息历史和步骤限制的 Agent Loop。",
     )
     return parser.parse_args()
 
@@ -46,7 +46,7 @@ def run_tool_demo(task: str) -> int:
 
 
 def run_agent_mode(task: str) -> int:
-    """运行最小 Agent Loop 并展示工具轨迹与最终答案。"""
+    """运行 Agent Loop 并展示工具轨迹与最终答案。"""
     settings = load_settings()
     result = run_agent(task, settings)
 
@@ -68,7 +68,7 @@ def main() -> int:
 
     try:
         if args.agent:
-            print("Read-only agent loop...")
+            print("Agent loop...")
             return run_agent_mode(args.agent)
 
         if args.tool_demo:
